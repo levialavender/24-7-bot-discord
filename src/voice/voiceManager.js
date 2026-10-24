@@ -128,13 +128,14 @@ class VoiceManager {
         return;
       }
 
-      if (
-        (existingConn.state.status === VoiceConnectionStatus.Connecting ||
-          existingConn.state.status === VoiceConnectionStatus.Signalling) &&
-        existingConn.joinConfig.channelId === this.channelId
-      ) {
-        logger.debug('Manager', 'Connection already in progress (Connecting/Signalling).');
-        return;
+      logger.warn(
+        'Manager',
+        `Found stale voice connection in state [${existingConn.state.status}]. Resetting before connecting...`
+      );
+      try {
+        existingConn.destroy();
+      } catch (err) {
+        // ignore
       }
     }
 
@@ -183,6 +184,22 @@ class VoiceManager {
       });
 
       this.attachConnectionListeners(this.connection);
+
+      // Wait up to 15 seconds for the connection to transition to Ready
+      try {
+        await entersState(this.connection, VoiceConnectionStatus.Ready, 15_000);
+      } catch (err) {
+        if (!this.isExplicitDisconnect && this.connection && this.connection.state.status !== VoiceConnectionStatus.Ready) {
+          logger.warn(
+            'Manager',
+            `Voice connection failed to reach Ready state within 15s (Current status: ${this.connection.state.status}). Reconnecting...`
+          );
+          try {
+            this.connection.destroy();
+          } catch {}
+          this.scheduleReconnect();
+        }
+      }
     } catch (err) {
       logger.error('Manager', `Connection error: ${err.message}`, err);
       this.scheduleReconnect();
@@ -195,6 +212,10 @@ class VoiceManager {
    */
   attachConnectionListeners(connection) {
     connection.removeAllListeners();
+
+    connection.on('error', (err) => {
+      logger.error('VoiceConnection', `Connection error: ${err.message}`, err);
+    });
 
     connection.on(VoiceConnectionStatus.Signalling, () => {
       logger.voice('Lifecycle', 'Status: Signalling (negotiating voice server details)...');

@@ -100,28 +100,46 @@ class GeminiService {
         }
       ];
 
-      // Call Gemini API with automatic retry on transient network errors (like fetch failed during VPS boot)
+      // Candidate models: primary model first, followed by reliable fallbacks
+      const fallbackModels = [this.modelName, 'gemini-3.5-flash', 'gemini-3.5-flash-lite'].filter(
+        (m, i, arr) => Boolean(m) && arr.indexOf(m) === i
+      );
+
       let response = null;
       let lastErr = null;
-      for (let attempt = 1; attempt <= 2; attempt++) {
-        try {
-          response = await this.ai.models.generateContent({
-            model: this.modelName,
-            contents,
-            config: {
-              systemInstruction: persona.systemInstruction,
-              tools: [{ functionDeclarations: this.getReminderTool().functionDeclarations }]
+
+      for (const currentModel of fallbackModels) {
+        for (let attempt = 1; attempt <= 2; attempt++) {
+          try {
+            response = await this.ai.models.generateContent({
+              model: currentModel,
+              contents,
+              config: {
+                systemInstruction: persona.systemInstruction,
+                tools: [{ functionDeclarations: this.getReminderTool().functionDeclarations }]
+              }
+            });
+            lastErr = null;
+            break;
+          } catch (err) {
+            lastErr = err;
+            const cause = err.cause?.code || err.cause?.message || '';
+            logger.warn(
+              'Gemini',
+              `Model ${currentModel} attempt ${attempt} failed: ${err.message} ${cause ? `[Cause: ${cause}]` : ''}`
+            );
+
+            // If model is not found, don't retry same model
+            if (err.message.includes('404') || err.message.includes('NOT_FOUND')) {
+              break;
             }
-          });
-          break;
-        } catch (err) {
-          lastErr = err;
-          const cause = err.cause?.code || err.cause?.message || '';
-          logger.warn('Gemini', `Request attempt ${attempt} failed: ${err.message} ${cause ? `[Cause: ${cause}]` : ''}`);
-          if (attempt < 2) {
-            await new Promise(res => setTimeout(res, 1500));
+
+            if (attempt < 2) {
+              await new Promise(res => setTimeout(res, 1200));
+            }
           }
         }
+        if (response) break;
       }
 
       if (!response && lastErr) {
@@ -179,10 +197,18 @@ class GeminiService {
 
       return { text: replyText, isReminder: false };
     } catch (err) {
+      let errorMsg = err.message || 'Unknown error';
+      try {
+        const parsed = JSON.parse(err.message);
+        if (parsed?.error?.message) {
+          errorMsg = parsed.error.message;
+        }
+      } catch {}
+
       const cause = err.cause?.code || err.cause?.message || '';
-      logger.error('Gemini', `Chat error: ${err.message} ${cause ? `[Cause: ${cause}]` : ''}`, err);
+      logger.error('Gemini', `Chat error: ${errorMsg} ${cause ? `[Cause: ${cause}]` : ''}`, err);
       return {
-        text: `⚠️ Maaf, terjadi kendala koneksi ke Gemini AI (${err.message}${cause ? `: ${cause}` : ''}). Coba kirim ulang pesanmu ya!`,
+        text: `⚠️ Maaf, terjadi kendala koneksi ke Gemini AI (${errorMsg}${cause ? `: ${cause}` : ''}). Coba kirim ulang pesanmu ya!`,
         isReminder: false
       };
     }
