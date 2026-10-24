@@ -27,8 +27,8 @@ class VoiceManager {
    */
   constructor(client, options) {
     this.client = client;
-    this.guildId = options.guildId;
-    this.channelId = options.channelId;
+    this.guildId = String(options.guildId || '').trim().replace(/['"]/g, '');
+    this.channelId = String(options.channelId || '').trim().replace(/['"]/g, '');
     this.enableSilenceStream = options.enableSilenceStream ?? true;
     this.healthCheckIntervalMs = options.healthCheckIntervalMs || 30000;
     this.maxReconnectDelayMs = options.maxReconnectDelayMs || 60000;
@@ -139,17 +139,30 @@ class VoiceManager {
     }
 
     try {
-      const guild = this.client.guilds.cache.get(this.guildId);
+      let guild = this.client.guilds.cache.get(this.guildId);
       if (!guild) {
-        logger.error('Manager', `Guild with ID ${this.guildId} not found in client cache.`);
-        this.scheduleReconnect();
-        return;
+        try {
+          guild = await this.client.guilds.fetch(this.guildId);
+        } catch (err) {
+          logger.error('Manager', `Guild with ID ${this.guildId} could not be fetched: ${err.message}`);
+          this.scheduleReconnect();
+          return;
+        }
       }
 
-      const channel = guild.channels.cache.get(this.channelId);
+      let channel = guild.channels.cache.get(this.channelId);
       if (!channel) {
-        logger.error('Manager', `Voice channel with ID ${this.channelId} not found in guild.`);
-        this.scheduleReconnect();
+        try {
+          channel = await guild.channels.fetch(this.channelId);
+        } catch (err) {
+          logger.error('Manager', `Voice channel with ID ${this.channelId} could not be fetched from guild: ${err.message}`);
+          this.scheduleReconnect();
+          return;
+        }
+      }
+
+      if (channel && typeof channel.isVoiceBased === 'function' && !channel.isVoiceBased()) {
+        logger.error('Manager', `Channel #${channel.name} (${this.channelId}) is NOT a Voice Channel! Please check CHANNEL_ID in .env.`);
         return;
       }
 
@@ -302,9 +315,20 @@ class VoiceManager {
         (currentConn.state.status === VoiceConnectionStatus.Connecting ||
           currentConn.state.status === VoiceConnectionStatus.Signalling)
       ) {
-        logger.debug('HealthWatchdog', 'Health-check: Connection in progress (Connecting/Signalling)...');
+        this.connectingTicks = (this.connectingTicks || 0) + 1;
+        if (this.connectingTicks >= 2) {
+          logger.warn('HealthWatchdog', 'Voice connection stuck in Connecting/Signalling state for >30s. Resetting...');
+          this.connectingTicks = 0;
+          try {
+            currentConn.destroy();
+          } catch {}
+          this.scheduleReconnect();
+        } else {
+          logger.debug('HealthWatchdog', 'Health-check: Connection in progress (Connecting/Signalling)...');
+        }
         return;
       }
+      this.connectingTicks = 0;
 
       // 3. Connection is missing, destroyed, or in a different channel without user intent
       logger.warn(

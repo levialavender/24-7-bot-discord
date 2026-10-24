@@ -1,4 +1,10 @@
 require('dotenv').config({ override: true });
+const dns = require('dns');
+// Set IPv4 first to prevent Node.js fetch failed on VPS with misconfigured or blocked IPv6
+if (dns.setDefaultResultOrder) {
+  dns.setDefaultResultOrder('ipv4first');
+}
+
 const {
   Client,
   GatewayIntentBits,
@@ -39,10 +45,10 @@ process.on('warning', (warning) => {
 });
 
 // 2. Validate Environment Variables
-const token = process.env.DISCORD_TOKEN;
-const guildId = process.env.GUILD_ID;
+const token = process.env.DISCORD_TOKEN ? process.env.DISCORD_TOKEN.trim().replace(/['"]/g, '') : null;
+const guildId = process.env.GUILD_ID ? process.env.GUILD_ID.trim().replace(/['"]/g, '') : null;
 const initialSettings = loadSettings();
-const channelId = initialSettings.customChannelId || process.env.CHANNEL_ID;
+const channelId = (initialSettings.customChannelId || process.env.CHANNEL_ID || '').trim().replace(/['"]/g, '');
 
 if (!token) {
   logger.error('Startup', 'CRITICAL: DISCORD_TOKEN is not defined in .env! Exiting...');
@@ -112,7 +118,7 @@ client.once(Events.ClientReady, async (c) => {
   logger.info('RichPresence', `Presence initialized: [${act.type}] "${act.name}" (${act.status || 'online'})`);
 
   // Initialize 24/7 Voice Manager
-  const activeChannelId = settings.customChannelId || channelId;
+  const activeChannelId = (settings.customChannelId || channelId || '').trim().replace(/['"]/g, '');
   if (guildId && activeChannelId) {
     voiceManager = new VoiceManager(client, {
       guildId,
@@ -125,6 +131,8 @@ client.once(Events.ClientReady, async (c) => {
     });
 
     await voiceManager.start();
+  } else {
+    logger.warn('Voice', `VoiceManager not started: guildId=${guildId || 'MISSING'}, channelId=${activeChannelId || 'MISSING'}. Check your .env!`);
   }
 
   // Start Smart Reminder Scheduler
