@@ -1,4 +1,4 @@
-require('dotenv').config();
+require('dotenv').config({ override: true });
 const {
   Client,
   GatewayIntentBits,
@@ -129,7 +129,24 @@ client.once(Events.ClientReady, async (c) => {
 
   // Start Smart Reminder Scheduler
   reminderManager.start(client);
+
+  // AI Channel Configuration Log
+  const aiChannels = getAiChannelIds();
+  if (aiChannels.length > 0) {
+    logger.info('AI', `Auto-reply active on text channel(s): ${aiChannels.join(', ')}`);
+  } else {
+    logger.info('AI', `No AI_CHANNEL_ID configured. Bot will respond when mentioned (@${c.user.username}) or via /ask.`);
+  }
 });
+
+// Helper to parse configured AI text channel IDs safely
+function getAiChannelIds() {
+  const raw = process.env.AI_CHANNEL_ID || '';
+  return raw
+    .split(/[,;\s]+/)
+    .map((id) => id.replace(/['"\r\n]/g, '').trim())
+    .filter(Boolean);
+}
 
 // Slash Command Interaction Handler
 client.on(Events.InteractionCreate, async (interaction) => {
@@ -160,7 +177,11 @@ client.on(Events.MessageCreate, async (message) => {
   if (message.author.bot) return;
 
   const isMentioned = client.user && message.mentions.has(client.user.id) && !message.mentions.everyone;
-  const isAiChannel = process.env.AI_CHANNEL_ID && message.channelId === process.env.AI_CHANNEL_ID;
+  const aiChannelIds = getAiChannelIds();
+  const isAiChannel = aiChannelIds.length > 0 && (
+    aiChannelIds.includes(message.channelId) ||
+    (message.channel?.parentId && aiChannelIds.includes(message.channel.parentId))
+  );
 
   if (!isMentioned && !isAiChannel) return;
 
