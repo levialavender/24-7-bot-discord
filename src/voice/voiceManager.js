@@ -117,6 +117,27 @@ class VoiceManager {
   async connect() {
     if (this.isExplicitDisconnect) return;
 
+    // Check if an active connection already exists in the target channel
+    const existingConn = getVoiceConnection(this.guildId);
+    if (existingConn) {
+      if (
+        existingConn.state.status === VoiceConnectionStatus.Ready &&
+        existingConn.joinConfig.channelId === this.channelId
+      ) {
+        logger.debug('Manager', 'Voice connection is already Ready in the target channel.');
+        return;
+      }
+
+      if (
+        (existingConn.state.status === VoiceConnectionStatus.Connecting ||
+          existingConn.state.status === VoiceConnectionStatus.Signalling) &&
+        existingConn.joinConfig.channelId === this.channelId
+      ) {
+        logger.debug('Manager', 'Connection already in progress (Connecting/Signalling).');
+        return;
+      }
+    }
+
     try {
       const guild = this.client.guilds.cache.get(this.guildId);
       if (!guild) {
@@ -160,7 +181,6 @@ class VoiceManager {
    * @param {import('@discordjs/voice').VoiceConnection} connection
    */
   attachConnectionListeners(connection) {
-    // Remove old listeners to avoid memory leaks
     connection.removeAllListeners();
 
     connection.on(VoiceConnectionStatus.Signalling, () => {
@@ -182,10 +202,14 @@ class VoiceManager {
         this.reconnectTimeout = null;
       }
 
-      // Subscribe audio player to send keep-alive silence packets
-      if (this.player) {
-        connection.subscribe(this.player);
-        this.playSilence();
+      // Subscribe audio player to send keep-alive silence packets only if enabled
+      if (this.player && this.enableSilenceStream) {
+        try {
+          connection.subscribe(this.player);
+          this.playSilence();
+        } catch (err) {
+          logger.warn('Lifecycle', `Could not subscribe silence player: ${err.message}`);
+        }
       }
     });
 
@@ -196,19 +220,16 @@ class VoiceManager {
       if (this.isExplicitDisconnect) return;
 
       try {
-        /*
-          According to Discord.js Voice documentation:
-          Calling entersState on Disconnected handles potential channel moves or
-          transient voice gateway disconnects where Discord automatically migrates.
-        */
+        // According to discord.js documentation:
+        // Wait up to 5s to see if connection automatically migrates / recovers
         await Promise.race([
           entersState(connection, VoiceConnectionStatus.Signalling, 5_000),
           entersState(connection, VoiceConnectionStatus.Connecting, 5_000)
         ]);
         logger.voice('Lifecycle', 'Connection recovering automatically through Signalling/Connecting state.');
       } catch {
-        // Connection did not recover within 5s, schedule reconnect
         logger.warn('Lifecycle', 'Connection dropped and did not recover within 5s. Reconnecting...');
+        this.isReconnecting = true;
         try {
           connection.destroy();
         } catch {
@@ -235,20 +256,20 @@ class VoiceManager {
    * Exponential backoff reconnect strategy.
    */
   scheduleReconnect() {
-    if (this.isExplicitDisconnect || this.isReconnecting) return;
+    if (this.isExplicitDisconnect) return;
+    if (this.reconnectTimeout) return; // Reconnect is already pending, avoid multiple parallel attempts
 
     this.isReconnecting = true;
     this.reconnectAttempts += 1;
 
     // Calculate delay with exponential backoff + jitter
-    const baseDelay = 2000;
-    const factor = Math.pow(1.5, Math.min(this.reconnectAttempts, 8));
+    const baseDelay = 3000;
+    const factor = Math.pow(1.5, Math.min(this.reconnectAttempts, 6));
     const jitter = Math.floor(Math.random() * 1000);
     const delay = Math.min(Math.floor(baseDelay * factor) + jitter, this.maxReconnectDelayMs);
 
     logger.voice('Reconnect', `Scheduling reconnect attempt #${this.reconnectAttempts} in ${delay}ms...`);
 
-    if (this.reconnectTimeout) clearTimeout(this.reconnectTimeout);
     this.reconnectTimeout = setTimeout(async () => {
       this.isReconnecting = false;
       this.reconnectTimeout = null;
@@ -263,34 +284,35 @@ class VoiceManager {
     if (this.healthCheckTimer) clearInterval(this.healthCheckTimer);
 
     this.healthCheckTimer = setInterval(async () => {
-      if (this.isExplicitDisconnect) return;
+      if (this.isExplicitDisconnect || this.isReconnecting) return;
 
       const currentConn = getVoiceConnection(this.guildId);
-      const guild = this.client.guilds.cache.get(this.guildId);
-      const botMember = guild?.members.me;
-      const currentChannelId = botMember?.voice?.channelId;
 
-      const isConnected = currentConn && currentConn.state.status === VoiceConnectionStatus.Ready;
-      const isInTargetChannel = currentChannelId === this.channelId;
-
-      if (!isConnected || !isInTargetChannel) {
-        logger.warn(
-          'HealthWatchdog',
-          `Voice connection check failed! (Connection State: ${currentConn?.state?.status ?? 'None'}, Channel: ${currentChannelId ?? 'None'}, Expected: ${this.channelId}). Triggering auto-reconnect...`
-        );
-
-        if (currentConn && currentConn.state.status !== VoiceConnectionStatus.Destroyed) {
-          try {
-            currentConn.destroy();
-          } catch {
-            // ignore
-          }
+      // 1. If connection is Ready and in the target channel, it is 100% fine. NEVER destroy it!
+      if (currentConn && currentConn.state.status === VoiceConnectionStatus.Ready) {
+        if (currentConn.joinConfig?.channelId === this.channelId) {
+          logger.debug('HealthWatchdog', 'Health-check OK: Bot is connected and stable.');
+          return;
         }
-
-        this.scheduleReconnect();
-      } else {
-        logger.debug('HealthWatchdog', `Health-check OK: Connected to #${botMember.voice.channel?.name || this.channelId}`);
       }
+
+      // 2. If it is currently connecting or signalling, allow it time to finish
+      if (
+        currentConn &&
+        (currentConn.state.status === VoiceConnectionStatus.Connecting ||
+          currentConn.state.status === VoiceConnectionStatus.Signalling)
+      ) {
+        logger.debug('HealthWatchdog', 'Health-check: Connection in progress (Connecting/Signalling)...');
+        return;
+      }
+
+      // 3. Connection is missing, destroyed, or in a different channel without user intent
+      logger.warn(
+        'HealthWatchdog',
+        `Voice connection lost or inactive (Status: ${currentConn?.state?.status ?? 'None'}). Triggering reconnect...`
+      );
+
+      this.scheduleReconnect();
     }, this.healthCheckIntervalMs);
   }
 

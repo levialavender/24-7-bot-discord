@@ -112,7 +112,7 @@ client.once(Events.ClientReady, async (c) => {
     voiceManager = new VoiceManager(client, {
       guildId,
       channelId: activeChannelId,
-      enableSilenceStream: process.env.ENABLE_SILENCE_STREAM !== 'false',
+      enableSilenceStream: process.env.ENABLE_SILENCE_STREAM === 'true',
       healthCheckIntervalMs: parseInt(process.env.HEALTH_CHECK_INTERVAL_MS, 10) || 30000,
       maxReconnectDelayMs: parseInt(process.env.MAX_RECONNECT_DELAY_MS, 10) || 60000,
       selfDeaf: process.env.SELF_DEAF !== 'false',
