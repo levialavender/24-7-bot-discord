@@ -186,21 +186,16 @@ class VoiceManager {
       });
 
       this.attachConnectionListeners(this.connection);
+      this.connectedSince = Date.now();
 
-      // Wait up to 15 seconds for the connection to transition to Ready
+      // Wait briefly for Ready state, but IF IT REMAINS IN SIGNALLING/CONNECTING, DO NOT DESTROY OR RECONNECT!
       try {
-        await entersState(this.connection, VoiceConnectionStatus.Ready, 15_000);
+        await entersState(this.connection, VoiceConnectionStatus.Ready, 10_000);
       } catch (err) {
-        if (!this.isExplicitDisconnect && this.connection && this.connection.state.status !== VoiceConnectionStatus.Ready) {
-          logger.warn(
-            'Manager',
-            `Voice connection failed to reach Ready state within 15s (Current status: ${this.connection.state.status}). Reconnecting...`
-          );
-          try {
-            this.connection.destroy();
-          } catch {}
-          this.scheduleReconnect();
-        }
+        logger.voice(
+          'Manager',
+          `Voice connection is currently in [${this.connection?.state?.status ?? 'Unknown'}] state. Staying connected in voice channel (no reconnect loop).`
+        );
       }
     } catch (err) {
       logger.error('Manager', `Connection error: ${err.message}`, err);
@@ -328,36 +323,20 @@ class VoiceManager {
 
       const currentConn = getVoiceConnection(this.guildId);
 
-      // 1. If connection is Ready and in the target channel, it is 100% fine. NEVER destroy it!
-      if (currentConn && currentConn.state.status === VoiceConnectionStatus.Ready) {
+      // 1. If connection is in the target channel (Ready, Signalling, or Connecting), keep it intact!
+      if (
+        currentConn &&
+        (currentConn.state.status === VoiceConnectionStatus.Ready ||
+          currentConn.state.status === VoiceConnectionStatus.Connecting ||
+          currentConn.state.status === VoiceConnectionStatus.Signalling)
+      ) {
         if (currentConn.joinConfig?.channelId === this.channelId) {
-          logger.debug('HealthWatchdog', 'Health-check OK: Bot is connected and stable.');
+          logger.debug('HealthWatchdog', `Health-check OK: Connection is active in state [${currentConn.state.status}].`);
           return;
         }
       }
 
-      // 2. If it is currently connecting or signalling, allow it time to finish
-      if (
-        currentConn &&
-        (currentConn.state.status === VoiceConnectionStatus.Connecting ||
-          currentConn.state.status === VoiceConnectionStatus.Signalling)
-      ) {
-        this.connectingTicks = (this.connectingTicks || 0) + 1;
-        if (this.connectingTicks >= 2) {
-          logger.warn('HealthWatchdog', 'Voice connection stuck in Connecting/Signalling state for >30s. Resetting...');
-          this.connectingTicks = 0;
-          try {
-            currentConn.destroy();
-          } catch {}
-          this.scheduleReconnect();
-        } else {
-          logger.debug('HealthWatchdog', 'Health-check: Connection in progress (Connecting/Signalling)...');
-        }
-        return;
-      }
-      this.connectingTicks = 0;
-
-      // 3. Connection is missing, destroyed, or in a different channel without user intent
+      // 2. Connection is missing, destroyed, or in a different channel without user intent
       logger.warn(
         'HealthWatchdog',
         `Voice connection lost or inactive (Status: ${currentConn?.state?.status ?? 'None'}). Triggering reconnect...`
@@ -379,9 +358,10 @@ class VoiceManager {
 
     const state = currentConn ? currentConn.state.status : 'Disconnected';
     const isReady = state === VoiceConnectionStatus.Ready;
+    const isJoined = currentConn && state !== VoiceConnectionStatus.Destroyed && state !== VoiceConnectionStatus.Disconnected;
 
     let voiceUptime = 'Not connected';
-    if (isReady && this.connectedSince) {
+    if (isJoined && this.connectedSince) {
       const elapsedSeconds = (Date.now() - this.connectedSince) / 1000;
       voiceUptime = formatDuration(elapsedSeconds);
     }

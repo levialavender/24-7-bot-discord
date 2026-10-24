@@ -20,7 +20,7 @@ module.exports = {
           name: '📊 Perintah Umum',
           value: [
             '• `/status` - Menampilkan metrik bot, status koneksi voice, latensi, dan resource VPS (CPU/RAM/Uptime).',
-            '• `/ask <prompt>` - Tanya apa saja ke AI (Google Gemini 3.5 Flash).',
+            '• `/ask <prompt>` - Tanya apa saja ke AI (9Router AI).',
             '• `/reminders <list|cancel|clear>` - Kelola jadwal pengingat (reminders) aktif kamu.',
             '• `/help` - Menampilkan menu bantuan dan panduan perintah ini.'
           ].join('\n')

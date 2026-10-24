@@ -1,12 +1,12 @@
 const { SlashCommandBuilder } = require('discord.js');
-const geminiService = require('../ai/geminiClient');
+const aiService = require('../ai/routerClient');
 const { splitMessage } = require('../utils/messageSplitter');
 const logger = require('../utils/logger');
 
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('ask')
-    .setDescription('Tanya apa saja ke AI (Google Gemini)')
+    .setDescription('Tanya apa saja ke AI (9Router)')
     .addStringOption(option =>
       option
         .setName('prompt')
@@ -21,7 +21,7 @@ module.exports = {
     await interaction.deferReply();
 
     try {
-      const response = await geminiService.chat({
+      const response = await aiService.chat({
         prompt,
         userId: interaction.user.id,
         userName: interaction.user.displayName || interaction.user.username,

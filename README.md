@@ -31,14 +31,14 @@ Bot Discord Voice 24/7 tangguh dan siap pakai untuk production, dibangun menggun
   - **Latensi:** WebSocket gateway ping, REST API round-trip latency, dan voice UDP ping.
   - **Resource Hardware:** Beban CPU (%), jumlah core CPU, RAM terpakai / total, pemakaian memori RSS bot, dan info OS VPS.
 
-- **🤖 AI Chatbot Cerdas (Google Gemini 3.5 Flash):**
+- **🤖 AI Chatbot Cerdas (9Router AI Provider):**
   - **Tanya Apa Saja:** Cukup mention `@Bot <pertanyaan>` di channel mana saja atau gunakan perintah `/ask <prompt>`.
   - **Memory Percakapan:** Bot mengingat konteks obrolan sebelumnya per channel sehingga percakapan terasa hidup dan nyambung.
   - **Dedicated AI Channel (Opsional):** Jika `AI_CHANNEL_ID` diisi di `.env`, semua pesan di channel tersebut otomatis dijawab AI tanpa perlu tag/mention.
 
 - **⏰ Smart Reminder (Pengingat Otomatis via Natural Language):**
   - **Chat Alami:** Cukup katakan ke bot: *"Ingatkan aku 30 menit lagi untuk makan siang"* atau *"2 jam lagi ingetin angkat jemuran"*.
-  - AI otomatis memproses waktu dan pesan dengan **Gemini Function Calling (`set_reminder`)**.
+  - AI otomatis memproses waktu dan pesan dengan **Function Calling (`set_reminder`) via 9Router**.
   - Saat waktunya tiba, bot otomatis me-mention kamu di channel: `⏰ @User Pengingat: [pesan]`.
   - **Penyimpanan Persisten:** Jadwal tersimpan aman di `data/reminders.json`, tidak akan hilang meskipun bot atau VPS direstart.
   - Perintah `/reminders list`, `/reminders cancel <id>`, dan `/reminders clear` untuk mengelola jadwal aktif.
@@ -71,12 +71,12 @@ discord-voice-bot/
 │   ├── index.js              # Inisialisasi client, event listener & anti-crash
 │   ├── deploy-commands.js    # Script deploy slash commands ke Discord REST API
 │   ├── ai/
-│   │   ├── geminiClient.js   # Integrasi Google Gemini 3.5 Flash & Function Calling
+│   │   ├── routerClient.js   # Integrasi 9Router (OpenAI-compatible) & Function Calling
 │   │   └── persona.js        # Pengelola prompt kepribadian AI
 │   ├── reminders/
 │   │   └── reminderManager.js# Pengelola timer pengingat & auto-mention
 │   ├── commands/
-│   │   ├── ask.js            # /ask - Tanya AI (Gemini 3.5 Flash)
+│   │   ├── ask.js            # /ask - Tanya AI (9Router)
 │   │   ├── help.js           # /help - Menu panduan bot
 │   │   ├── join.js           # /join - Pindah channel voice (Admin)
 │   │   ├── leave.js          # /leave - Keluar dari voice channel (Admin)
@@ -156,9 +156,10 @@ MAX_RECONNECT_DELAY_MS=60000
 SELF_DEAF=true
 SELF_MUTE=false
 
-# Google Gemini AI Settings
-GEMINI_API_KEY=your_gemini_api_key_here
-GEMINI_MODEL=gemini-3.5-flash
+# 9Router AI Settings (OpenAI-compatible)
+ROUTER_BASE_URL=http://localhost:20128/v1
+ROUTER_API_KEY=9router-local
+ROUTER_MODEL=claude-3-5-sonnet
 # Optional: Set a specific text channel ID for AI chat without mentioning bot
 AI_CHANNEL_ID=
 ```
@@ -248,7 +249,7 @@ pm2 startup
 
 | Perintah | Hak Akses | Deskripsi |
 | :--- | :--- | :--- |
-| **`/ask`** | Semua Member | Tanya apa saja ke AI (Google Gemini 3.5 Flash). |
+| **`/ask`** | Semua Member | Tanya apa saja ke AI (9Router AI). |
 | **`/reminders`** | Semua Member | Kelola jadwal pengingat aktif milikmu (`list`, `cancel`, `clear`). |
 | **`/status`** | Semua Member | Menampilkan status voice bot, latensi API/WS, uptime, dan pemakaian CPU & RAM pada VPS. |
 | **`/help`** | Semua Member | Menampilkan menu bantuan dan daftar seluruh perintah yang tersedia. |

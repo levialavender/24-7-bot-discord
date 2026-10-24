@@ -17,7 +17,7 @@ const path = require('path');
 const logger = require('./utils/logger');
 const VoiceManager = require('./voice/voiceManager');
 const { loadSettings } = require('./utils/settings');
-const geminiService = require('./ai/geminiClient');
+const aiService = require('./ai/routerClient');
 const reminderManager = require('./reminders/reminderManager');
 const { splitMessage } = require('./utils/messageSplitter');
 
@@ -209,7 +209,7 @@ client.on(Events.MessageCreate, async (message) => {
     // Show typing status
     await message.channel.sendTyping().catch(() => {});
 
-    const response = await geminiService.chat({
+    const response = await aiService.chat({
       prompt,
       userId: message.author.id,
       userName: message.member?.displayName || message.author.username,
