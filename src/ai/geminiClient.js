@@ -10,7 +10,8 @@ const MAX_HISTORY_TURNS = 10;
 class GeminiService {
   constructor() {
     this.apiKey = process.env.GEMINI_API_KEY ? process.env.GEMINI_API_KEY.trim().replace(/['"]/g, '') : null;
-    this.modelName = (process.env.GEMINI_MODEL || 'gemini-3.5-flash').trim().replace(/['"]/g, '');
+    // Default to gemini-3.5-flash-lite which has generous 1500 RPD free tier (unlike flash which has only 20 RPD)
+    this.modelName = (process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite').trim().replace(/['"]/g, '');
     this.ai = null;
 
     if (this.apiKey) {
@@ -30,7 +31,7 @@ class GeminiService {
    */
   reload() {
     this.apiKey = process.env.GEMINI_API_KEY ? process.env.GEMINI_API_KEY.trim().replace(/['"]/g, '') : null;
-    this.modelName = (process.env.GEMINI_MODEL || 'gemini-3.5-flash').trim().replace(/['"]/g, '');
+    this.modelName = (process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite').trim().replace(/['"]/g, '');
     if (this.apiKey) {
       this.ai = new GoogleGenAI({ apiKey: this.apiKey });
       logger.info('Gemini', `Gemini Client reloaded with model: ${this.modelName}`);
@@ -101,7 +102,7 @@ class GeminiService {
       ];
 
       // Candidate models: primary model first, followed by reliable fallbacks
-      const fallbackModels = [this.modelName, 'gemini-3.5-flash', 'gemini-3.5-flash-lite'].filter(
+      const fallbackModels = [this.modelName, 'gemini-3.5-flash-lite', 'gemini-3.8-flash'].filter(
         (m, i, arr) => Boolean(m) && arr.indexOf(m) === i
       );
 
@@ -120,6 +121,9 @@ class GeminiService {
               }
             });
             lastErr = null;
+            if (currentModel !== this.modelName) {
+              logger.info('Gemini', `Successfully generated response using fallback model: ${currentModel}`);
+            }
             break;
           } catch (err) {
             lastErr = err;
@@ -129,8 +133,15 @@ class GeminiService {
               `Model ${currentModel} attempt ${attempt} failed: ${err.message} ${cause ? `[Cause: ${cause}]` : ''}`
             );
 
-            // If model is not found, don't retry same model
-            if (err.message.includes('404') || err.message.includes('NOT_FOUND')) {
+            // If model is not found, rate-limited (429), or quota exhausted, immediately switch to next model
+            const isQuotaOrNotFound =
+              err.message.includes('404') ||
+              err.message.includes('NOT_FOUND') ||
+              err.message.includes('429') ||
+              err.message.includes('RESOURCE_EXHAUSTED') ||
+              err.message.includes('Quota exceeded');
+
+            if (isQuotaOrNotFound) {
               break;
             }
 
@@ -207,6 +218,14 @@ class GeminiService {
 
       const cause = err.cause?.code || err.cause?.message || '';
       logger.error('Gemini', `Chat error: ${errorMsg} ${cause ? `[Cause: ${cause}]` : ''}`, err);
+
+      if (errorMsg.includes('429') || errorMsg.includes('quota') || errorMsg.includes('RESOURCE_EXHAUSTED')) {
+        return {
+          text: `⚠️ **Rate Limit / Kuota API Tercapai (429 RESOURCE_EXHAUSTED)**\n\n💡 **Penjelasan:**\nLangganan **Gemini Plus / Google One AI** kamu berlaku untuk aplikasi web (*gemini.google.com*), **bukan** untuk kuota API Developer di Google AI Studio (*aistudio.google.com*). API key kamu saat ini berada di **Free Tier** yang memiliki batasan request harian.\n\n🛠️ **Solusi:**\n1. Bot sekarang otomatis memakai model hemat kuota (\`gemini-3.5-flash-lite\`).\n2. Jika ingin kuota tanpa batas untuk bot, kamu bisa menghubungkan kartu/billing di [Google AI Studio](https://aistudio.google.com) (biayanya Pay-As-You-Go, sangat murah hanya sepersekian sen!).`,
+          isReminder: false
+        };
+      }
+
       return {
         text: `⚠️ Maaf, terjadi kendala koneksi ke Gemini AI (${errorMsg}${cause ? `: ${cause}` : ''}). Coba kirim ulang pesanmu ya!`,
         isReminder: false

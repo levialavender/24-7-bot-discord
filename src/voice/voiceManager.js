@@ -137,6 +137,8 @@ class VoiceManager {
       } catch (err) {
         // ignore
       }
+      // Brief pause to allow Discord gateway to cleanly deregister the old session
+      await new Promise((r) => setTimeout(r, 1000));
     }
 
     try {
@@ -212,6 +214,10 @@ class VoiceManager {
    */
   attachConnectionListeners(connection) {
     connection.removeAllListeners();
+
+    connection.on('stateChange', (oldState, newState) => {
+      logger.voice('Lifecycle', `State changed: ${oldState.status} -> ${newState.status}`);
+    });
 
     connection.on('error', (err) => {
       logger.error('VoiceConnection', `Connection error: ${err.message}`, err);
