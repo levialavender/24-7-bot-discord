@@ -31,6 +31,22 @@ Bot Discord Voice 24/7 tangguh dan siap pakai untuk production, dibangun menggun
   - **Latensi:** WebSocket gateway ping, REST API round-trip latency, dan voice UDP ping.
   - **Resource Hardware:** Beban CPU (%), jumlah core CPU, RAM terpakai / total, pemakaian memori RSS bot, dan info OS VPS.
 
+- **🤖 AI Chatbot Cerdas (Google Gemini 3.5 Flash):**
+  - **Tanya Apa Saja:** Cukup mention `@Bot <pertanyaan>` di channel mana saja atau gunakan perintah `/ask <prompt>`.
+  - **Memory Percakapan:** Bot mengingat konteks obrolan sebelumnya per channel sehingga percakapan terasa hidup dan nyambung.
+  - **Dedicated AI Channel (Opsional):** Jika `AI_CHANNEL_ID` diisi di `.env`, semua pesan di channel tersebut otomatis dijawab AI tanpa perlu tag/mention.
+
+- **⏰ Smart Reminder (Pengingat Otomatis via Natural Language):**
+  - **Chat Alami:** Cukup katakan ke bot: *"Ingatkan aku 30 menit lagi untuk makan siang"* atau *"2 jam lagi ingetin angkat jemuran"*.
+  - AI otomatis memproses waktu dan pesan dengan **Gemini Function Calling (`set_reminder`)**.
+  - Saat waktunya tiba, bot otomatis me-mention kamu di channel: `⏰ @User Pengingat: [pesan]`.
+  - **Penyimpanan Persisten:** Jadwal tersimpan aman di `data/reminders.json`, tidak akan hilang meskipun bot atau VPS direstart.
+  - Perintah `/reminders list`, `/reminders cancel <id>`, dan `/reminders clear` untuk mengelola jadwal aktif.
+
+- **🎭 Persona & Karakter AI Kustom (`/setpersona`):**
+  - Gaya bahasa awal: asisten hangat, manis, ramah, dan perhatian untuk server sepasang kekasih.
+  - Admin/Owner bisa melihat atau mengubah instruksi kepribadian kapan saja lewat perintah `/setpersona` tanpa menyentuh kode.
+
 - **🛡️ Anti-Crash & Auto-Restart:**
   - Penanganan error global (`uncaughtException`, `unhandledRejection`, `warning`) agar proses bot tidak mati mendadak saat terjadi error jaringan.
   - Konfigurasi **PM2** (`ecosystem.config.js`) siap pakai dengan auto-restart, batas memori, dan logging otomatis.
@@ -48,22 +64,33 @@ discord-voice-bot/
 ├── index.js                  # Entry point utama (mengarahkan ke src/index.js)
 ├── deploy-commands.js        # Helper registrasi slash commands
 ├── data/
-│   └── settings.json         # Penyimpanan pengaturan persisten (Rich Presence & Channel)
+│   ├── settings.json         # Penyimpanan pengaturan persisten (Rich Presence & Channel)
+│   ├── persona.json          # Instruksi persona/kepribadian AI
+│   └── reminders.json        # Database pengingat aktif (auto-reload saat restart)
 ├── src/
 │   ├── index.js              # Inisialisasi client, event listener & anti-crash
 │   ├── deploy-commands.js    # Script deploy slash commands ke Discord REST API
+│   ├── ai/
+│   │   ├── geminiClient.js   # Integrasi Google Gemini 3.5 Flash & Function Calling
+│   │   └── persona.js        # Pengelola prompt kepribadian AI
+│   ├── reminders/
+│   │   └── reminderManager.js# Pengelola timer pengingat & auto-mention
 │   ├── commands/
+│   │   ├── ask.js            # /ask - Tanya AI (Gemini 3.5 Flash)
 │   │   ├── help.js           # /help - Menu panduan bot
 │   │   ├── join.js           # /join - Pindah channel voice (Admin)
 │   │   ├── leave.js          # /leave - Keluar dari voice channel (Admin)
 │   │   ├── reconnect.js      # /reconnect - Paksa koneksi ulang (Admin)
+│   │   ├── reminders.js      # /reminders - Kelola pengingat aktif (list/cancel/clear)
 │   │   ├── setactivity.js    # /setactivity - Ubah Rich Presence bot (Admin)
+│   │   ├── setpersona.js     # /setpersona - Ubah kepribadian AI bot (Admin)
 │   │   └── status.js         # /status - Diagnostik bot & resource VPS
 │   ├── voice/
 │   │   ├── silenceStream.js  # Generator paket hening Opus 20ms
 │   │   └── voiceManager.js   # Pengelola koneksi 24/7, lifecycle & watchdog
 │   └── utils/
 │       ├── logger.js         # Logger berwarna dengan stempel waktu
+│       ├── messageSplitter.js# Pemecah pesan teks panjang (<2000 karakter)
 │       ├── settings.js       # Helper baca/tulis pengaturan persisten
 │       └── systemMetrics.js  # Pengambil metrik CPU, RAM, Uptime & OS
 └── README.md                 # Dokumentasi panduan lengkap
@@ -123,11 +150,17 @@ GUILD_ID=123456789012345678
 CHANNEL_ID=987654321098765432
 
 # Pengaturan Voice Bot (Opsional / Default sudah optimal)
-ENABLE_SILENCE_STREAM=true
+ENABLE_SILENCE_STREAM=false
 HEALTH_CHECK_INTERVAL_MS=30000
 MAX_RECONNECT_DELAY_MS=60000
 SELF_DEAF=true
 SELF_MUTE=false
+
+# Google Gemini AI Settings
+GEMINI_API_KEY=your_gemini_api_key_here
+GEMINI_MODEL=gemini-3.5-flash
+# Optional: Set a specific text channel ID for AI chat without mentioning bot
+AI_CHANNEL_ID=
 ```
 
 #### Cara Mendapatkan ID di Discord:
@@ -142,7 +175,9 @@ SELF_MUTE=false
 
 1. Buka [Discord Developer Portal](https://discord.com/developers/applications) -> Pilih Bot kamu.
 2. Buka tab **Bot**:
-   - Di bagian **Privileged Gateway Intents**, centang **SERVER MEMBERS INTENT**.
+   - Di bagian **Privileged Gateway Intents**, centang:
+     - **SERVER MEMBERS INTENT**
+     - **MESSAGE CONTENT INTENT** *(Wajib agar bot bisa membaca pesan dan merespons saat di-mention)*.
 3. Buka tab **OAuth2** -> **URL Generator**:
    - **Scopes**: Centang `bot` dan `applications.commands`.
    - **Bot Permissions**:
@@ -213,12 +248,15 @@ pm2 startup
 
 | Perintah | Hak Akses | Deskripsi |
 | :--- | :--- | :--- |
+| **`/ask`** | Semua Member | Tanya apa saja ke AI (Google Gemini 3.5 Flash). |
+| **`/reminders`** | Semua Member | Kelola jadwal pengingat aktif milikmu (`list`, `cancel`, `clear`). |
 | **`/status`** | Semua Member | Menampilkan status voice bot, latensi API/WS, uptime, dan pemakaian CPU & RAM pada VPS. |
 | **`/help`** | Semua Member | Menampilkan menu bantuan dan daftar seluruh perintah yang tersedia. |
-| **`/setactivity`** | **Administrator** | Mengubah aktivitas Rich Presence bot (Playing, Listening, Watching, Competing, Streaming, Custom) dan status (Online, Idle, DND, Invisible). |
-| **`/join`** | **Administrator** | Memindahkan bot ke voice channel lain dan menyimpannya sebagai target 24/7 baru. |
-| **`/reconnect`** | **Administrator** | Memaksa bot melakukan reset dan koneksi ulang ke voice channel secara instan. |
-| **`/leave`** | **Administrator** | Mengeluarkan bot dari voice channel dan menjeda proteksi auto-reconnect 24/7. |
+| **`/setpersona`** | **Manage Server** | Melihat atau mengubah instruksi persona/kepribadian bot AI secara fleksibel. |
+| **`/setactivity`** | **Manage Server** | Mengubah aktivitas Rich Presence bot (Playing, Listening, Watching, Streaming, Custom) dan status (Online, Idle, DND, Invisible). |
+| **`/join`** | **Manage Server** | Memindahkan bot ke voice channel lain dan menyimpannya sebagai target 24/7 baru. |
+| **`/reconnect`** | **Manage Server** | Memaksa bot melakukan reset dan koneksi ulang ke voice channel secara instan. |
+| **`/leave`** | **Manage Server** | Mengeluarkan bot dari voice channel dan menjeda proteksi auto-reconnect 24/7. |
 
 ---
 

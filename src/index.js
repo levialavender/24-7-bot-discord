@@ -11,6 +11,9 @@ const path = require('path');
 const logger = require('./utils/logger');
 const VoiceManager = require('./voice/voiceManager');
 const { loadSettings } = require('./utils/settings');
+const geminiService = require('./ai/geminiClient');
+const reminderManager = require('./reminders/reminderManager');
+const { splitMessage } = require('./utils/messageSplitter');
 
 // Activity Type Resolver
 const ActivityTypeMap = {
@@ -57,7 +60,9 @@ if (!guildId || !channelId) {
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildVoiceStates
+    GatewayIntentBits.GuildVoiceStates,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent
   ]
 });
 
@@ -121,6 +126,9 @@ client.once(Events.ClientReady, async (c) => {
 
     await voiceManager.start();
   }
+
+  // Start Smart Reminder Scheduler
+  reminderManager.start(client);
 });
 
 // Slash Command Interaction Handler
@@ -144,6 +152,57 @@ client.on(Events.InteractionCreate, async (interaction) => {
     } else {
       await interaction.reply({ content: errorMessage, ephemeral: true }).catch(() => {});
     }
+  }
+});
+
+// 5. AI Chatbot & Smart Reminders Message Listener
+client.on(Events.MessageCreate, async (message) => {
+  if (message.author.bot) return;
+
+  const isMentioned = client.user && message.mentions.has(client.user.id) && !message.mentions.everyone;
+  const isAiChannel = process.env.AI_CHANNEL_ID && message.channelId === process.env.AI_CHANNEL_ID;
+
+  if (!isMentioned && !isAiChannel) return;
+
+  // Extract cleaned prompt
+  let prompt = message.content;
+  if (client.user) {
+    prompt = prompt.replace(new RegExp(`<@!?${client.user.id}>`, 'g'), '').trim();
+  }
+
+  if (!prompt) {
+    return message.reply({
+      content: 'Halo! Ada yang bisa aku bantu? Kamu bisa tanya apa saja atau suruh aku buat reminder (contoh: *"Ingatkan aku 30 menit lagi untuk mandi"*). ✨💖'
+    }).catch(() => {});
+  }
+
+  try {
+    // Show typing status
+    await message.channel.sendTyping().catch(() => {});
+
+    const response = await geminiService.chat({
+      prompt,
+      userId: message.author.id,
+      userName: message.member?.displayName || message.author.username,
+      channelId: message.channelId,
+      guildId: message.guildId
+    });
+
+    const chunks = splitMessage(response.text, 1950);
+    for (let i = 0; i < chunks.length; i++) {
+      if (i === 0) {
+        await message.reply({
+          content: chunks[i],
+          allowedMentions: { repliedUser: false }
+        });
+      } else {
+        await message.channel.send({
+          content: chunks[i]
+        });
+      }
+    }
+  } catch (err) {
+    logger.error('MessageAI', `Error responding to message: ${err.message}`, err);
   }
 });
 
@@ -186,6 +245,7 @@ client.on(Events.ShardResume, (shardId, replayedEvents) => {
 // 5. Graceful Shutdown
 const handleShutdown = async (signal) => {
   logger.info('Shutdown', `Received ${signal}. Gracefully stopping bot...`);
+  reminderManager.stop();
   if (voiceManager) {
     voiceManager.destroy();
   }
