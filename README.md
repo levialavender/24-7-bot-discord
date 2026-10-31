@@ -31,7 +31,7 @@ Bot Discord Voice 24/7 tangguh dan siap pakai untuk production, dibangun menggun
   - **Latensi:** WebSocket gateway ping, REST API round-trip latency, dan voice UDP ping.
   - **Resource Hardware:** Beban CPU (%), jumlah core CPU, RAM terpakai / total, pemakaian memori RSS bot, dan info OS VPS.
 
-- **🤖 AI Chatbot Cerdas (9Router AI Provider):**
+- **🤖 AI Chatbot Cerdas :**
   - **Tanya Apa Saja:** Cukup mention `@Bot <pertanyaan>` di channel mana saja atau gunakan perintah `/ask <prompt>`.
   - **Memory Percakapan:** Bot mengingat konteks obrolan sebelumnya per channel sehingga percakapan terasa hidup dan nyambung.
   - **Dedicated AI Channel (Opsional):** Jika `AI_CHANNEL_ID` diisi di `.env`, semua pesan di channel tersebut otomatis dijawab AI tanpa perlu tag/mention.
@@ -156,12 +156,6 @@ MAX_RECONNECT_DELAY_MS=60000
 SELF_DEAF=true
 SELF_MUTE=false
 
-# 9Router AI Settings (OpenAI-compatible)
-ROUTER_BASE_URL=http://localhost:20128/v1
-ROUTER_API_KEY=9router-local
-ROUTER_MODEL=claude-3-5-sonnet
-# Optional: Set a specific text channel ID for AI chat without mentioning bot
-AI_CHANNEL_ID=
 ```
 
 #### Cara Mendapatkan ID di Discord:
